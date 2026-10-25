@@ -116,3 +116,76 @@ jobs:
             echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
           fi
 
+      - name: Gate final de segurança
+        if: always()
+        shell: bash
+        env:
+          BUILD_OUTCOME: ${{ steps.build_image.outcome }}
+          SYFT_OUTCOME: ${{ steps.syft_scan.outcome }}
+          TRIVY_OUTCOME: ${{ steps.trivy_scan.outcome }}
+        run: |
+          set -u
+          failed=0
+
+          {
+            echo "## Resultado dos scans"
+            echo
+            echo "| Verificação | Resultado |"
+            echo "| --- | --- |"
+            echo "| Construção da imagem | `$BUILD_OUTCOME` |"
+            echo "| SBOM com Syft | `$SYFT_OUTCOME` |"
+            echo "| Vulnerabilidades com Trivy (HIGH/CRITICAL) | `$TRIVY_OUTCOME` |"
+            echo
+            echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for result in \
+            "construção da imagem:$BUILD_OUTCOME" \
+            "SBOM com Syft:$SYFT_OUTCOME" \
+            "Trivy:$TRIVY_OUTCOME" \
+            name="${result%%:*}"
+            outcome="${result#*:}"
+            if [[ "$outcome" != "success" ]]; then
+              echo "Falha em: $name (resultado: $outcome)"
+              failed=1
+            fi
+          done
+
+          if [[ -s reports/trivy.json ]]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('reports/trivy.json', 'utf8'));
+          const findings = (report.Results || []).flatMap(result =>
+            (result.Vulnerabilities || []).map(vulnerability => ({
+              id: vulnerability.VulnerabilityID || '—',
+              severity: vulnerability.Severity || '—',
+              package: vulnerability.PkgName || '—',
+              installed: vulnerability.InstalledVersion || '—',
+              fixed: vulnerability.FixedVersion || ''
+            }))
+          );
+          const highOrCritical = findings.filter(item =>
+            ['HIGH', 'CRITICAL'].includes(item.severity.toUpperCase()) && item.fixed
+          );
+          console.log('### Achados do Trivy');
+          console.log('');
+          if (highOrCritical.length === 0) {
+            console.log('Nenhuma vulnerabilidade HIGH ou CRITICAL com correção disponível foi encontrada.');
+          } else {
+            console.log('| CVE | Severidade | Pacote | Versão instalada | Versão corrigida |');
+            console.log('| --- | --- | --- | --- | --- |');
+            for (const item of highOrCritical) {
+              console.log(`| ${item.id} | ${item.severity} | ${item.package} | ${item.installed} | ${item.fixed} |`);
+            }
+          }
+          console.log('');
+          NODE
+          fi
+
+          if [[ "$failed" -eq 0 ]]; then
+            echo "Aplicação considerada segura para os critérios executados: todos os scans foram concluídos sem falhas e o Cosign confirmou a integridade da imagem." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Aplicação não considerada segura: pelo menos um scan ou verificação falhou. Consulte os logs e os relatórios publicados como artefato." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
