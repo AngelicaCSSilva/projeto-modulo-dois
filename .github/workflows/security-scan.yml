@@ -24,3 +24,16 @@ jobs:
     steps:
       - name: Baixar o repositório
         uses: actions/checkout@v4
+
+      - name: Preparar diretório e variáveis de ambiente
+        id: prepare
+        shell: bash
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          mkdir -p reports
+          image="demo:${GITHUB_SHA}"
+          echo "scenario=$SCENARIO" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "## Análise do cenário: `$SCENARIO`" >> "$GITHUB_STEP_SUMMARY"
+
