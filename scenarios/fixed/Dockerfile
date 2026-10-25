@@ -4,17 +4,26 @@ FROM node:24-alpine
 # Define a pasta de trabalho dentro do container.
 WORKDIR /app
 
-# Copia manifests antes do código para facilitar cache das dependências.
+# Atualiza o npm e corrige a dependência interna undici, ainda desatualizada no
+# bundle do npm 12.2.1. As versões fixas tornam essa atualização reproduzível.
+RUN npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund \
+    && echo "undici incluído no npm 12.2.1:" \
+    && node -p "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version" \
+    && npm install --prefix /usr/local/lib/node_modules/npm undici@6.29.1 \
+       --no-save --package-lock=false --ignore-scripts --no-audit --no-fund \
+    && node -e "const root='/usr/local/lib/node_modules/npm/node_modules/'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.1']]) { const actual=require(root+name+'/package.json').version; console.log(name+'@'+actual); if (actual !== expected) process.exitCode=1; }"
+
+# Copia os manifests antes do código para aproveitar o cache de dependências.
 COPY package.json ./
 COPY package-lock.json ./
 
-# Instala exatamente a dependência travada no lockfile, sem scripts ou auditoria npm.
+# Instala exatamente a dependência da aplicação travada no lockfile.
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Copia o serviço de demonstração para dentro da imagem.
 COPY app.js ./
 
-# Executa com usuário não privilegiado node, em vez do root.
+# Executa com usuário não privilegiado node.
 USER node
 
 # Expõe a porta HTTP usada pelo servidor de demonstração.
