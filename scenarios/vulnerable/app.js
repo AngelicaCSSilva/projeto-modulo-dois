@@ -10,6 +10,7 @@ const server = http.createServer((request, response) => {
   // Separa caminho e query string sem decodificar a query automaticamente.
   // Assim, a sequência percent-encoded chega intacta à dependência abaixo.
   const [path, rawQuery = ""] = request.url.split("?", 2);
+  console.log(`[http] ${request.method} ${request.url}`);
 
   // A rota inicial serve apenas para a verificação de disponibilidade do workflow.
   if (request.method !== "GET" || path !== "/payment") {
@@ -24,7 +25,9 @@ const server = http.createServer((request, response) => {
 
   // O valor controlado pelo cliente vai direto ao pacote de decodificação.
   // A versão da dependência é a única diferença entre os cenários.
+  console.log(`[decode] Iniciando decodificacao da referencia recebida (${encodedReference.length} caracteres).`);
   const reference = decodeUriComponent(encodedReference);
+  console.log("[decode] Decodificacao concluida.");
 
   // Se a decodificação terminar, responde como uma consulta fictícia normal.
   response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
