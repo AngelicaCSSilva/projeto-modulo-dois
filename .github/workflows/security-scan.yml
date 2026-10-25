@@ -132,25 +132,26 @@ jobs:
             echo
             echo "| Verificação | Resultado |"
             echo "| --- | --- |"
-            echo "| Construção da imagem | `$BUILD_OUTCOME` |"
-            echo "| SBOM com Syft | `$SYFT_OUTCOME` |"
-            echo "| Vulnerabilidades com Trivy (HIGH/CRITICAL) | `$TRIVY_OUTCOME` |"
+            printf '| Construção da imagem | %s |\n' "$BUILD_OUTCOME"
+            printf '| SBOM com Syft | %s |\n' "$SYFT_OUTCOME"
+            printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$TRIVY_OUTCOME"
             echo
             echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-          for result in \
-            "construção da imagem:$BUILD_OUTCOME" \
-            "SBOM com Syft:$SYFT_OUTCOME" \
-            "Trivy:$TRIVY_OUTCOME" \
-            name="${result%%:*}"
-            outcome="${result#*:}"
+          check_outcome() {
+            local name="$1"
+            local outcome="$2"
             if [[ "$outcome" != "success" ]]; then
               echo "Falha em: $name (resultado: $outcome)"
               failed=1
             fi
-          done
+          }
+
+          check_outcome "construção da imagem" "$BUILD_OUTCOME"
+          check_outcome "SBOM com Syft" "$SYFT_OUTCOME"
+          check_outcome "Trivy" "$TRIVY_OUTCOME"
 
           if [[ -s reports/trivy.json ]]; then
             node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
