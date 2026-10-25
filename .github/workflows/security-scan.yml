@@ -37,3 +37,26 @@ jobs:
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "## Análise do cenário: `$SCENARIO`" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Construir imagem do cenário selecionado
+        id: build_image
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          SCENARIO: ${{ steps.prepare.outputs.scenario }}
+          IMAGE: ${{ steps.prepare.outputs.image }}
+        run: |
+          docker build --tag "$IMAGE" "scenarios/$SCENARIO"
+          docker save --output reports/image.tar "$IMAGE"
+
+      - name: Gerar SBOM com Syft
+        id: syft_scan
+        if: always()
+        continue-on-error: true
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ steps.prepare.outputs.image }}
+          format: cyclonedx-json
+          output-file: reports/sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
