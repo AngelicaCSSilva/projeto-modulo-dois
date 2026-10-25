@@ -37,6 +37,9 @@ jobs:
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "## Análise do cenário: `$SCENARIO`" >> "$GITHUB_STEP_SUMMARY"
 
+      # A imagem é construída uma única vez e usada por todas as ferramentas.
+      # Se a construção falhar, as etapas de análise ainda serão executadas e
+      # registrarão a falha; o gate final reunirá todos os resultados.
       - name: Construir imagem do cenário selecionado
         id: build_image
         if: always()
@@ -49,6 +52,7 @@ jobs:
           docker build --tag "$IMAGE" "scenarios/$SCENARIO"
           docker save --output reports/image.tar "$IMAGE"
 
+      # O Syft gera um inventário CycloneDX dos componentes da imagem.
       - name: Gerar SBOM com Syft
         id: syft_scan
         if: always()
@@ -61,6 +65,8 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      # O Trivy analisa o sistema operacional e as dependências da imagem.
+      # O código 1 indica achados HIGH ou CRITICAL, mas não interrompe os demais scans.
       - name: Procurar vulnerabilidades com Trivy
         id: trivy_scan
         if: always()
@@ -77,6 +83,7 @@ jobs:
           vuln-type: os,library
           timeout: 10m
 
+      # Imprime apenas a lista de vulnerabilidades, sem o restante do JSON do Trivy.
       - name: Imprimir vulnerabilidades encontradas
         if: always()
         continue-on-error: true
