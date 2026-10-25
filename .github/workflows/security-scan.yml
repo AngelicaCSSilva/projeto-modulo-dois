@@ -83,8 +83,28 @@ jobs:
         shell: bash
         run: |
           if [[ -s reports/trivy.json ]]; then
-            echo 'Relatório do Trivy (JSON):'
-            cat reports/trivy.json
+            node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('reports/trivy.json', 'utf8'));
+          const vulnerabilities = (report.Results || []).flatMap(result =>
+            (result.Vulnerabilities || []).map(item => ({
+              id: item.VulnerabilityID || '—',
+              severity: item.Severity || '—',
+              package: item.PkgName || '—',
+              installed: item.InstalledVersion || '—',
+              fixed: item.FixedVersion || '—'
+            }))
+          );
+
+          console.log('Vulnerabilidades encontradas:');
+          if (vulnerabilities.length === 0) {
+            console.log('Nenhuma vulnerabilidade encontrada.');
+          } else {
+            for (const item of vulnerabilities) {
+              console.log(`- ${item.id} | ${item.severity} | ${item.package} | instalada: ${item.installed} | corrigida: ${item.fixed}`);
+            }
+          }
+          NODE
           else
             echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
           fi
