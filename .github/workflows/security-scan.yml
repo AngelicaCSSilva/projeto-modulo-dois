@@ -53,10 +53,39 @@ jobs:
         id: syft_scan
         if: always()
         continue-on-error: true
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ steps.prepare.outputs.image }}
           format: cyclonedx-json
           output-file: reports/sbom.cdx.json
           upload-artifact: false
           upload-release-assets: false
+
+      - name: Procurar vulnerabilidades com Trivy
+        id: trivy_scan
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.prepare.outputs.image }}
+          format: json
+          output: reports/trivy.json
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          timeout: 10m
+
+      - name: Imprimir vulnerabilidades encontradas
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [[ -s reports/trivy.json ]]; then
+            echo 'Relatório do Trivy (JSON):'
+            cat reports/trivy.json
+          else
+            echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
+          fi
+
