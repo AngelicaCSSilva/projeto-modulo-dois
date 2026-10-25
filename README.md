@@ -1,4 +1,5 @@
 # Raio-X da Cadeia de Suprimentos
+Projeto do segundo módulo da formação em Especialista em Esteira DevSecOps da ADA. 
 
 Este projeto demonstra uma vulnerabilidade real de dependência npm: **CVE-2022-38900**, no pacote `decode-uri-component`. O exemplo usa um serviço bancário fictício para mostrar como uma entrada enviada por um cliente externo pode chegar a uma biblioteca vulnerável.
 
