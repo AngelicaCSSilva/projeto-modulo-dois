@@ -1,0 +1,26 @@
+name: Análise de segurança da cadeia de suprimentos
+run-name: "Scans de segurança — ${{ inputs.scenario }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Cenário da aplicação que será analisado
+        type: choice
+        required: true
+        default: fixed
+        options:
+          - vulnerable
+          - fixed
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  scan:
+    name: Analisar imagem e verificar integridade
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v4
