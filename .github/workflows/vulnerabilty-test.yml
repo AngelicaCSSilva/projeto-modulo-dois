@@ -1,12 +1,12 @@
 name: Vulnerability Test Workflow - Demonstrar CVE-2022-38900
 run-name: "[ Ambiente: ${{ inputs.scenario }} ] Workflow de teste de vulnerabilidade"
 
-# Execucao manual para escolher um unico cenario.
+# Execução manual para escolher um único cenário.
 on:
   workflow_dispatch:
     inputs:
       scenario:
-        description: Cenario para demonstracao da CVE-2022-38900
+        description: Cenário para demonstração da CVE-2022-38900
         type: choice
         required: true
         default: vulnerable
@@ -15,20 +15,20 @@ on:
           - fixed
 
 permissions:
-  # O workflow so precisa ler o repositorio para construir a imagem.
+  # O workflow só precisa ler o repositório para construir a imagem.
   contents: read
 
 jobs:
   attack-demo:
-    # Executa somente o cenario selecionado em um container isolado.
+    # Executa somente o cenário selecionado em um container isolado.
     name: Demonstrar falha de decode-uri-component
     runs-on: ubuntu-latest
     steps:
-      - name: Baixar o repositorio
+      - name: Baixar o repositório
         uses: actions/checkout@v4
 
-      # Coleta o resultado; o gate avalia o status depois da demonstracao.
-      - name: Enviar requisicao externa ao cenario escolhido
+      # Coleta o resultado; o gate avalia o status depois da demonstração.
+      - name: Enviar requisição externa ao cenário escolhido
         id: attack
         shell: bash
         env:
@@ -37,35 +37,48 @@ jobs:
           scenario="$SCENARIO"
           image="supply-chain-demo-${scenario}:${GITHUB_SHA}"
           container="supply-chain-demo-${scenario}-${GITHUB_RUN_ID}"
+          dependency_version="$(node -p "require('./scenarios/' + process.argv[1] + '/package.json').dependencies['decode-uri-component']" "$scenario")"
           failed=0
           client_result=not_run
           running=unknown
-          echo "## Cenario: ${scenario}" >> "$GITHUB_STEP_SUMMARY"
-          echo "[workflow] Selecionado: ${scenario}" 
+          {
+            echo "## Demonstração da CVE-2022-38900"
+            echo
+            echo "| Informação | Valor |"
+            echo "|---|---|"
+            echo "| Cenário | \`${scenario}\` |"
+            echo "| Dependência | \`decode-uri-component@${dependency_version}\` |"
+            echo "| Entrada enviada | \`%ea%ba%5a%ba\` |"
+            echo "| Destino | \`http://127.0.0.1:3000/payment\` |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "[workflow] Cenário selecionado: ${scenario}"
+          echo "[workflow] Versão de decode-uri-component: ${dependency_version}"
           echo "[workflow] Construindo imagem: ${image}"
 
           if ! docker build -t "$image" "scenarios/${scenario}"; then
-            echo "Build falhou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "[workflow] ERRO: a construção da imagem falhou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
             failed=1
           elif ! docker run -d --name "$container" --cpus=1 --memory=256m -p 127.0.0.1:3000:3000 "$image"; then
             # Limita recursos e publica a porta apenas no loopback do runner.
-            echo "Container nao iniciou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "[workflow] ERRO: o container não iniciou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
             failed=1
           else
             echo "[workflow] Container iniciado: ${container}"
-            echo "[workflow] Aguardando endpoint HTTP de prontidao..."
+            echo "[workflow] Aguardando o endpoint HTTP de prontidão..."
             ready=0
             for attempt in {1..30}; do
               if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
                 ready=1
-                echo "[workflow] Servico pronto apos tentativa ${attempt}."
+                echo "[workflow] Serviço pronto após a tentativa ${attempt}."
                 break
               fi
-              echo "[workflow] Tentativa ${attempt}/30: servico ainda iniciando."
+              echo "[workflow] Tentativa ${attempt}/30: serviço ainda iniciando."
               sleep 2
             done
 
-            # O cliente separado envia a requisicao HTTP de demonstracao.
+            # O cliente separado envia a requisição HTTP de demonstração.
             if [[ "$ready" -eq 1 ]]; then
               if node scripts/demo-attack.mjs "$scenario"; then
                 client_result=passed
@@ -74,41 +87,65 @@ jobs:
                 failed=1
               fi
             else
-              echo "Servico nao ficou pronto para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
-              echo "[workflow] ERRO: readiness check nao recebeu HTTP 200."
+              echo "[workflow] ERRO: o serviço não ficou pronto para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "[workflow] A verificação de prontidão não recebeu HTTP 200."
               client_result=not_ready
               failed=1
             fi
 
-            # Confirma se a conexao falhou porque o processo vulneravel encerrou.
+            # Confirma se a conexão falhou porque o processo vulnerável encerrou.
             running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || echo unknown)"
             echo "[workflow] Resultado do cliente: ${client_result}"
-            echo "[workflow] Container ainda em execucao apos requisicao: ${running}"
+            echo "[workflow] Container em execução após a requisição: ${running}"
+            {
+              echo
+              echo "#### Verificação do processo"
+              echo
+              echo "| Verificação | Resultado |"
+              echo "|---|---|"
+              echo "| Cliente externo | \`${client_result}\` |"
+              echo "| Container ainda ativo | \`${running}\` |"
+            } >> "$GITHUB_STEP_SUMMARY"
             if [[ "$scenario" == "vulnerable" && "$running" != "false" ]]; then
-              echo "[workflow] ERRO: esperava o encerramento do container vulneravel."
+              echo "[workflow] ERRO: era esperado que o container vulnerável encerrasse."
               failed=1
             elif [[ "$scenario" == "fixed" && "$running" != "true" ]]; then
-              echo "[workflow] ERRO: esperava que o container corrigido continuasse ativo."
+              echo "[workflow] ERRO: era esperado que o container corrigido continuasse ativo."
               failed=1
             fi
 
-            # Mostra no log do job a excecao real do Node e tambem a inclui no Summary.
+            # Exibe o stack trace no console do job e em bloco shell no Summary.
             echo "[workflow] Logs do servidor antes da limpeza:"
+            {
+              echo
+              echo "#### Log do servidor (Docker)"
+              echo
+              echo '```shell'
+            } >> "$GITHUB_STEP_SUMMARY"
             docker logs --timestamps "$container" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
             docker rm -f "$container" >/dev/null 2>&1
           fi
 
-          echo "[workflow] Resultado final da demonstracao: $([[ "$failed" -eq 0 ]] && echo PASSOU || echo FALHOU)"
+          result="FALHOU"
+          [[ "$failed" -eq 0 ]] && result="PASSOU"
+          echo "[workflow] Resultado final da demonstração: ${result}"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Resultado do job de demonstração: ${result}.**" >> "$GITHUB_STEP_SUMMARY"
           echo "gate_passed=$([[ "$failed" -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      # O gate final roda depois da demonstracao do cenario selecionado.
-      - name: Gate final da demonstracao
+      # O gate final roda depois da demonstração do cenário selecionado.
+      - name: Gate final da demonstração
         if: always()
         env:
           GATE_PASSED: ${{ steps.attack.outputs.gate_passed }}
         run: |
           if [[ "$GATE_PASSED" != "true" ]]; then
-            echo "O cenario nao correspondeu ao resultado esperado da CVE-2022-38900." >> "$GITHUB_STEP_SUMMARY"
+            echo "## Gate final: reprovado" >> "$GITHUB_STEP_SUMMARY"
+            echo "O cenário não correspondeu ao resultado esperado da CVE-2022-38900." >> "$GITHUB_STEP_SUMMARY"
+            echo "[gate] REPROVADO: consulte os logs do cliente e do servidor acima."
             exit 1
           fi
-          echo "O resultado corresponde ao comportamento esperado do cenario escolhido." >> "$GITHUB_STEP_SUMMARY"
+          echo "## Gate final: aprovado" >> "$GITHUB_STEP_SUMMARY"
+          echo "O resultado corresponde ao comportamento esperado do cenário escolhido." >> "$GITHUB_STEP_SUMMARY"
+          echo "[gate] APROVADO: o comportamento observado corresponde ao cenário escolhido."

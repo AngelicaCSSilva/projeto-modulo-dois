@@ -25,9 +25,9 @@ const server = http.createServer((request, response) => {
 
   // O valor controlado pelo cliente vai direto ao pacote de decodificação.
   // A versão da dependência é a única diferença entre os cenários.
-  console.log(`[decode] Iniciando decodificacao da referencia recebida (${encodedReference.length} caracteres).`);
+  console.log(`[decode] Iniciando a decodificação da referência recebida (${encodedReference.length} caracteres).`);
   const reference = decodeUriComponent(encodedReference);
-  console.log("[decode] Decodificacao concluida.");
+  console.log("[decode] Decodificação concluída.");
 
   // Se a decodificação terminar, responde como uma consulta fictícia normal.
   response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
