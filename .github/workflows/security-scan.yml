@@ -149,6 +149,8 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build_image.outcome }}
           SYFT_OUTCOME: ${{ steps.syft_scan.outcome }}
           TRIVY_OUTCOME: ${{ steps.trivy_scan.outcome }}
+          CONFTEST_INSTALL_OUTCOME: ${{ steps.conftest_install.outcome }}
+          REGO_OUTCOME: ${{ steps.rego_policy.outcome }}
         run: |
           set -u
           failed=0
@@ -169,6 +171,8 @@ jobs:
             printf '| Construção da imagem | %s |\n' "$(scan_status "$BUILD_OUTCOME")"
             printf '| SBOM com Syft | %s |\n' "$(scan_status "$SYFT_OUTCOME")"
             printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$(scan_status "$TRIVY_OUTCOME")"
+            printf '| Instalação do Conftest | %s |\n' "$(scan_status "$CONFTEST_INSTALL_OUTCOME")"
+            printf '| Políticas Rego | %s |\n' "$(scan_status "$REGO_OUTCOME")"
             echo
             echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
             echo
@@ -186,6 +190,8 @@ jobs:
           check_outcome "construção da imagem" "$BUILD_OUTCOME"
           check_outcome "SBOM com Syft" "$SYFT_OUTCOME"
           check_outcome "Trivy" "$TRIVY_OUTCOME"
+          check_outcome "instalação do Conftest" "$CONFTEST_INSTALL_OUTCOME"
+          check_outcome "política Rego" "$REGO_OUTCOME"
 
           if [[ -s reports/trivy.json ]]; then
             node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
@@ -218,8 +224,19 @@ jobs:
           NODE
           fi
 
+          if [[ -s reports/conftest.log ]]; then
+            {
+              echo "### Resultado detalhado da política Rego"
+              echo
+              echo '```text'
+              cat reports/conftest.log
+              echo '```'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
           if [[ "$failed" -eq 0 ]]; then
-            echo "Aplicação considerada segura para os critérios executados: todos os scans foram concluídos sem falhas e o Cosign confirmou a integridade da imagem." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Aplicação considerada segura para os critérios executados: todos os scans e políticas foram concluídos sem falhas e o Cosign confirmou a integridade da imagem." | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "Aplicação não considerada segura: pelo menos um scan ou verificação falhou. Consulte os logs e os relatórios publicados como artefato." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
