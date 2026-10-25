@@ -14,6 +14,9 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 # Copia o serviço de demonstração para dentro da imagem.
 COPY app.js ./
 
+# Executa com usuário não privilegiado node, em vez do root.
+USER node
+
 # Expõe a porta HTTP usada pelo servidor de demonstração.
 EXPOSE 3000
 # Inicia o app quando o container é executado.
