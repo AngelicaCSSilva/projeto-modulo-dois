@@ -116,6 +116,32 @@ jobs:
             echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
           fi
 
+      - name: Instalar Conftest
+        id: conftest_install
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          version="0.71.1"
+          archive="$RUNNER_TEMP/conftest.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${version}/conftest_${version}_Linux_x86_64.tar.gz" \
+            --output "$archive"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" conftest
+          sudo install --mode 0755 "$RUNNER_TEMP/conftest" /usr/local/bin/conftest
+          conftest --version
+
+      - name: Avaliar políticas Rego com Conftest
+        id: rego_policy
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          SCENARIO: ${{ steps.prepare.outputs.scenario }}
+        run: |
+          set -o pipefail
+          conftest test "scenarios/${SCENARIO}/Dockerfile" \
+            --policy policies/docker/ 2>&1 | tee reports/conftest.log
       - name: Gate final de segurança
         if: always()
         shell: bash
