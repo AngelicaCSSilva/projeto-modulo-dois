@@ -38,7 +38,11 @@ jobs:
           image="supply-chain-demo-${scenario}:${GITHUB_SHA}"
           container="supply-chain-demo-${scenario}-${GITHUB_RUN_ID}"
           failed=0
+          client_result=not_run
+          running=unknown
           echo "## Cenario: ${scenario}" >> "$GITHUB_STEP_SUMMARY"
+          echo "[workflow] Selecionado: ${scenario}" 
+          echo "[workflow] Construindo imagem: ${image}"
 
           if ! docker build -t "$image" "scenarios/${scenario}"; then
             echo "Build falhou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
@@ -48,25 +52,53 @@ jobs:
             echo "Container nao iniciou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
             failed=1
           else
+            echo "[workflow] Container iniciado: ${container}"
+            echo "[workflow] Aguardando endpoint HTTP de prontidao..."
             ready=0
             for attempt in {1..30}; do
               if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
                 ready=1
+                echo "[workflow] Servico pronto apos tentativa ${attempt}."
                 break
               fi
+              echo "[workflow] Tentativa ${attempt}/30: servico ainda iniciando."
               sleep 2
             done
 
             # O cliente separado envia a requisicao HTTP de demonstracao.
             if [[ "$ready" -eq 1 ]]; then
-              node scripts/demo-attack.mjs "$scenario" || failed=1
+              if node scripts/demo-attack.mjs "$scenario"; then
+                client_result=passed
+              else
+                client_result=failed
+                failed=1
+              fi
             else
               echo "Servico nao ficou pronto para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+              echo "[workflow] ERRO: readiness check nao recebeu HTTP 200."
+              client_result=not_ready
               failed=1
             fi
+
+            # Confirma se a conexao falhou porque o processo vulneravel encerrou.
+            running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || echo unknown)"
+            echo "[workflow] Resultado do cliente: ${client_result}"
+            echo "[workflow] Container ainda em execucao apos requisicao: ${running}"
+            if [[ "$scenario" == "vulnerable" && "$running" != "false" ]]; then
+              echo "[workflow] ERRO: esperava o encerramento do container vulneravel."
+              failed=1
+            elif [[ "$scenario" == "fixed" && "$running" != "true" ]]; then
+              echo "[workflow] ERRO: esperava que o container corrigido continuasse ativo."
+              failed=1
+            fi
+
+            # Mostra no log do job a excecao real do Node e tambem a inclui no Summary.
+            echo "[workflow] Logs do servidor antes da limpeza:"
+            docker logs --timestamps "$container" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
             docker rm -f "$container" >/dev/null 2>&1
           fi
 
+          echo "[workflow] Resultado final da demonstracao: $([[ "$failed" -eq 0 ]] && echo PASSOU || echo FALHOU)"
           echo "gate_passed=$([[ "$failed" -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       # O gate final roda depois da demonstracao do cenario selecionado.
