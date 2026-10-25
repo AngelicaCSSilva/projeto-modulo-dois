@@ -134,18 +134,29 @@ jobs:
           echo "**Resultado do job de demonstração: ${result}.**" >> "$GITHUB_STEP_SUMMARY"
           echo "gate_passed=$([[ "$failed" -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      # O gate final roda depois da demonstração do cenário selecionado.
-      - name: Gate final da demonstração
+      # O Resultado final roda depois da demonstração do cenário selecionado.
+      - name: Resultado final da demonstração
         if: always()
         env:
           GATE_PASSED: ${{ steps.attack.outputs.gate_passed }}
+          SCENARIO: ${{ inputs.scenario }}
         run: |
+          if [[ "$SCENARIO" == "vulnerable" ]]; then
+            expected="a requisição provoca a exceção e o processo vulnerável encerra"
+          else
+            expected="a versão corrigida responde com HTTP 200 e continua em execução"
+          fi
+
           if [[ "$GATE_PASSED" != "true" ]]; then
-            echo "## Gate final: reprovado" >> "$GITHUB_STEP_SUMMARY"
-            echo "O cenário não correspondeu ao resultado esperado da CVE-2022-38900." >> "$GITHUB_STEP_SUMMARY"
-            echo "[gate] REPROVADO: consulte os logs do cliente e do servidor acima."
+            echo "## Resultado final: comportamento diferente do esperado" >> "$GITHUB_STEP_SUMMARY"
+            echo "Cenário selecionado: **${SCENARIO}**." >> "$GITHUB_STEP_SUMMARY"
+            echo "Comportamento esperado: ${expected}." >> "$GITHUB_STEP_SUMMARY"
+            echo "O resultado observado não confirmou esse comportamento. Consulte os logs do cliente e do servidor acima." >> "$GITHUB_STEP_SUMMARY"
+            echo "[resultado] O cenário ${SCENARIO} não apresentou o comportamento esperado: ${expected}."
             exit 1
           fi
-          echo "## Gate final: aprovado" >> "$GITHUB_STEP_SUMMARY"
-          echo "O resultado corresponde ao comportamento esperado do cenário escolhido." >> "$GITHUB_STEP_SUMMARY"
-          echo "[gate] APROVADO: o comportamento observado corresponde ao cenário escolhido."
+          echo "## Resultado final: comportamento esperado observado" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cenário selecionado: **${SCENARIO}**." >> "$GITHUB_STEP_SUMMARY"
+          echo "Comportamento esperado: ${expected}." >> "$GITHUB_STEP_SUMMARY"
+          echo "O resultado observado corresponde ao esperado para este cenário." >> "$GITHUB_STEP_SUMMARY"
+          echo "[resultado] O cenário ${SCENARIO} apresentou o comportamento esperado: ${expected}."
