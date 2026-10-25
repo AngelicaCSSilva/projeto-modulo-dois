@@ -9,8 +9,13 @@ WORKDIR /app
 RUN npm install --global npm@12.2.1 --ignore-scripts --no-audit --no-fund \
     && echo "undici incluído no npm 12.2.1:" \
     && node -p "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version" \
-    && npm install --prefix /usr/local/lib/node_modules/npm undici@6.29.1 \
-       --no-save --package-lock=false --ignore-scripts --no-audit --no-fund \
+    && mkdir -p /tmp/undici-patch \
+    && npm pack undici@6.29.1 --pack-destination /tmp/undici-patch --ignore-scripts \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici \
+    && mkdir -p /usr/local/lib/node_modules/npm/node_modules/undici \
+    && tar -xzf /tmp/undici-patch/undici-6.29.1.tgz --strip-components=1 \
+       -C /usr/local/lib/node_modules/npm/node_modules/undici \
+    && rm -rf /tmp/undici-patch \
     && node -e "const root='/usr/local/lib/node_modules/npm/node_modules/'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.1']]) { const actual=require(root+name+'/package.json').version; console.log(name+'@'+actual); if (actual !== expected) process.exitCode=1; }"
 
 # Copia os manifests antes do código para aproveitar o cache de dependências.
