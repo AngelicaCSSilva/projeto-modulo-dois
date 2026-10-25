@@ -140,8 +140,9 @@ jobs:
           SCENARIO: ${{ steps.prepare.outputs.scenario }}
         run: |
           set -o pipefail
-          conftest test "scenarios/${SCENARIO}/Dockerfile" \
+          conftest test --no-color "scenarios/${SCENARIO}/Dockerfile" \
             --policy policies/docker/ 2>&1 | tee reports/conftest.log
+
       - name: Gate final de segurança
         if: always()
         shell: bash
