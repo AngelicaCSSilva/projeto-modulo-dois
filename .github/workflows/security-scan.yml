@@ -127,14 +127,22 @@ jobs:
           set -u
           failed=0
 
+          scan_status() {
+            if [[ "$1" == "success" ]]; then
+              printf '✅ %s' "$1"
+            else
+              printf '❌ %s' "$1"
+            fi
+          }
+
           {
             echo "## Resultado dos scans"
             echo
             echo "| Verificação | Resultado |"
             echo "| --- | --- |"
-            printf '| Construção da imagem | %s |\n' "$BUILD_OUTCOME"
-            printf '| SBOM com Syft | %s |\n' "$SYFT_OUTCOME"
-            printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$TRIVY_OUTCOME"
+            printf '| Construção da imagem | %s |\n' "$(scan_status "$BUILD_OUTCOME")"
+            printf '| SBOM com Syft | %s |\n' "$(scan_status "$SYFT_OUTCOME")"
+            printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$(scan_status "$TRIVY_OUTCOME")"
             echo
             echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
             echo
