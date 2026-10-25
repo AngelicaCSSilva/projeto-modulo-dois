@@ -1,0 +1,82 @@
+name: Vulnerability Test Workflow - Demonstrar CVE-2022-38900
+run-name: "[ Ambiente: ${{ inputs.scenario }} ] Workflow de teste de vulnerabilidade"
+
+# Execucao manual para escolher um unico cenario.
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Cenario para demonstracao da CVE-2022-38900
+        type: choice
+        required: true
+        default: vulnerable
+        options:
+          - vulnerable
+          - fixed
+
+permissions:
+  # O workflow so precisa ler o repositorio para construir a imagem.
+  contents: read
+
+jobs:
+  attack-demo:
+    # Executa somente o cenario selecionado em um container isolado.
+    name: Demonstrar falha de decode-uri-component
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositorio
+        uses: actions/checkout@v4
+
+      # Coleta o resultado; o gate avalia o status depois da demonstracao.
+      - name: Enviar requisicao externa ao cenario escolhido
+        id: attack
+        shell: bash
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          scenario="$SCENARIO"
+          image="supply-chain-demo-${scenario}:${GITHUB_SHA}"
+          container="supply-chain-demo-${scenario}-${GITHUB_RUN_ID}"
+          failed=0
+          echo "## Cenario: ${scenario}" >> "$GITHUB_STEP_SUMMARY"
+
+          if ! docker build -t "$image" "scenarios/${scenario}"; then
+            echo "Build falhou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+            failed=1
+          elif ! docker run -d --name "$container" --cpus=1 --memory=256m -p 127.0.0.1:3000:3000 "$image"; then
+            # Limita recursos e publica a porta apenas no loopback do runner.
+            echo "Container nao iniciou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+            failed=1
+          else
+            ready=0
+            for attempt in {1..30}; do
+              if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
+                ready=1
+                break
+              fi
+              sleep 2
+            done
+
+            # O cliente separado envia a requisicao HTTP de demonstracao.
+            if [[ "$ready" -eq 1 ]]; then
+              node scripts/demo-attack.mjs "$scenario" || failed=1
+            else
+              echo "Servico nao ficou pronto para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+            docker rm -f "$container" >/dev/null 2>&1
+          fi
+
+          echo "gate_passed=$([[ "$failed" -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # O gate final roda depois da demonstracao do cenario selecionado.
+      - name: Gate final da demonstracao
+        if: always()
+        env:
+          GATE_PASSED: ${{ steps.attack.outputs.gate_passed }}
+        run: |
+          if [[ "$GATE_PASSED" != "true" ]]; then
+            echo "O cenario nao correspondeu ao resultado esperado da CVE-2022-38900." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "O resultado corresponde ao comportamento esperado do cenario escolhido." >> "$GITHUB_STEP_SUMMARY"
