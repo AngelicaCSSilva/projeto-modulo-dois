@@ -1,12 +1,11 @@
-name: Vulnerability Test Workflow - Demonstrar CVE-2022-38900
-run-name: "[ Ambiente: ${{ inputs.scenario }} ] Workflow de teste de vulnerabilidade"
+name: Demonstração de vulnerabilidades da imagem
+run-name: "Cenário ${{ inputs.scenario }} — demonstração de segurança"
 
-# Execução manual para escolher um único cenário.
 on:
   workflow_dispatch:
     inputs:
       scenario:
-        description: Cenário para demonstração da CVE-2022-38900
+        description: Cenário para demonstração
         type: choice
         required: true
         default: vulnerable
@@ -15,13 +14,11 @@ on:
           - fixed
 
 permissions:
-  # O workflow só precisa ler o repositório para construir a imagem.
   contents: read
 
 jobs:
-  attack-demo:
-    # Executa somente o cenário selecionado em um container isolado.
-    name: Demonstrar falha de decode-uri-component
+  build_image:
+    name: Construir imagem de demonstração
     runs-on: ubuntu-latest
     steps:
       - name: Baixar o repositório
@@ -29,208 +26,213 @@ jobs:
         with:
           persist-credentials: false
 
-      # Coleta o resultado; o gate avalia o status depois da demonstração.
-      - name: Enviar requisição externa ao cenário escolhido
-        id: attack
+      - name: Construir imagem do cenário
+        id: build
         shell: bash
         env:
           SCENARIO: ${{ inputs.scenario }}
-        run: |
-          scenario="$SCENARIO"
-          image="supply-chain-demo-${scenario}:${GITHUB_SHA}"
-          container="supply-chain-demo-${scenario}-${GITHUB_RUN_ID}"
-          dependency_version="$(node -p "require('./scenarios/' + process.argv[1] + '/package.json').dependencies['decode-uri-component']" "$scenario")"
-          failed=0
-          client_result=not_run
-          running=unknown
-          {
-            echo "## Demonstração da CVE-2022-38900"
-            echo
-            echo "| Informação | Valor |"
-            echo "|---|---|"
-            echo "| Cenário | \`${scenario}\` |"
-            echo "| Dependência | \`decode-uri-component@${dependency_version}\` |"
-            echo "| Entrada enviada | \`%ea%ba%5a%ba\` |"
-            echo "| Destino | \`http://127.0.0.1:3000/payment\` |"
-            echo
-          } >> "$GITHUB_STEP_SUMMARY"
+          IMAGE: demo:${{ github.sha }}
+        run: docker build --tag "$IMAGE" "scenarios/$SCENARIO"
 
-          echo "[workflow] Cenário selecionado: ${scenario}"
-          echo "[workflow] Versão de decode-uri-component: ${dependency_version}"
-          echo "[workflow] Construindo imagem: ${image}"
+      - name: Exportar imagem para o próximo job
+        id: save_image
+        shell: bash
+        env:
+          IMAGE: demo:${{ github.sha }}
+        run: docker save --output image.tar "$IMAGE"
 
-          if ! docker build -t "$image" "scenarios/${scenario}"; then
-            echo "[workflow] ERRO: a construção da imagem falhou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
-            failed=1
-          elif ! docker run -d --name "$container" --cpus=1 --memory=256m -p 127.0.0.1:3000:3000 "$image"; then
-            # Limita recursos e publica a porta apenas no loopback do runner.
-            echo "[workflow] ERRO: o container não iniciou para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
-            failed=1
-          else
-            echo "[workflow] Container iniciado: ${container}"
+      - name: Publicar imagem como artefato
+        id: upload_image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: imagem-demo-${{ github.run_id }}
+          path: image.tar
+          if-no-files-found: error
+          compression-level: 0
 
-            # Confirma a identidade efetiva do processo dentro do container.
-            if runtime_uid="$(docker exec "$container" id -u)"; then
-              echo "[workflow] UID efetivo dentro do container: ${runtime_uid}"
-              if [[ "$scenario" == "vulnerable" && "$runtime_uid" != "0" ]]; then
-                echo "[workflow] ERRO: era esperado UID 0 no cenário vulnerável."
-                failed=1
-              elif [[ "$scenario" == "fixed" && "$runtime_uid" == "0" ]]; then
-                echo "[workflow] ERRO: o cenário corrigido não deve executar como root."
-                failed=1
-              else
-                echo "[workflow] Usuário efetivo corresponde ao esperado para ${scenario}."
-              fi
-            else
-              runtime_uid=unknown
-              echo "[workflow] ERRO: não foi possível consultar o UID do processo no container."
-              failed=1
-            fi
-            {
-              echo
-              echo "#### Usuário efetivo do container"
-              echo
-              echo "| Cenário | UID observado | Resultado esperado |"
-              echo "|---|---:|---|"
-              if [[ "$scenario" == "vulnerable" ]]; then
-                echo "| \`${scenario}\` | \`${runtime_uid}\` | UID 0 (root) |"
-              else
-                echo "| \`${scenario}\` | \`${runtime_uid}\` | UID diferente de 0 |"
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-            # Simulates malicious code running as the app's default user.
-            # The protected canary file exists only inside this disposable container.
-            protected_file="/root/privilege-canary.txt"
-            if ! docker exec --user 0 "$container" sh -c "printf original > '${protected_file}' && chmod 600 '${protected_file}'"; then
-              echo "[ataque] ERRO: nao foi possivel preparar o arquivo canario protegido."
-              attack_result=setup_failed
-              failed=1
-            else
-              echo "[ataque] Tentando alterar arquivo root-only com o usuario padrao do app..."
-              if attack_output="$(docker exec "$container" sh -c "printf 'alterado pelo processo do app' >> '${protected_file}'" 2>&1)"; then
-                attack_result=succeeded
-                echo "[ataque] A escrita no arquivo protegido foi permitida."
-              else
-                attack_result=blocked
-                echo "[ataque] A escrita no arquivo protegido foi negada."
-              fi
-              if [[ -n "$attack_output" ]]; then
-                echo "$attack_output"
-              fi
-
-              if [[ "$scenario" == "vulnerable" && "$attack_result" != "succeeded" ]]; then
-                echo "[ataque] ERRO: era esperado que root conseguisse alterar o arquivo canario."
-                failed=1
-              elif [[ "$scenario" == "fixed" && "$attack_result" != "blocked" ]]; then
-                echo "[ataque] ERRO: o usuario nao privilegiado deveria ter a escrita negada."
-                failed=1
-              fi
-            fi
-            {
-              echo
-              echo "#### Simulacao de abuso de privilegio"
-              echo
-              echo "Tentativa de anexar conteudo a ${protected_file} com o usuario padrao do processo da aplicacao."
-              echo
-              echo "| Cenario | Resultado da tentativa | Esperado |"
-              echo "|---|---|---|"
-              if [[ "$scenario" == "vulnerable" ]]; then
-                echo "| ${scenario} | ${attack_result} | Escrita permitida como root |"
-              else
-                echo "| ${scenario} | ${attack_result} | Escrita negada para usuario nao privilegiado |"
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "[workflow] Aguardando o endpoint HTTP de prontidão..."
-            ready=0
-            for attempt in {1..30}; do
-              if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
-                ready=1
-                echo "[workflow] Serviço pronto após a tentativa ${attempt}."
-                break
-              fi
-              echo "[workflow] Tentativa ${attempt}/30: serviço ainda iniciando."
-              sleep 2
-            done
-
-            # O cliente separado envia a requisição HTTP de demonstração.
-            if [[ "$ready" -eq 1 ]]; then
-              if node scripts/demo-attack.mjs "$scenario"; then
-                client_result=passed
-              else
-                client_result=failed
-                failed=1
-              fi
-            else
-              echo "[workflow] ERRO: o serviço não ficou pronto para ${scenario}." | tee -a "$GITHUB_STEP_SUMMARY"
-              echo "[workflow] A verificação de prontidão não recebeu HTTP 200."
-              client_result=not_ready
-              failed=1
-            fi
-
-            # Confirma se a conexão falhou porque o processo vulnerável encerrou.
-            running="$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || echo unknown)"
-            echo "[workflow] Resultado do cliente: ${client_result}"
-            echo "[workflow] Container em execução após a requisição: ${running}"
-            {
-              echo
-              echo "#### Verificação do processo"
-              echo
-              echo "| Verificação | Resultado |"
-              echo "|---|---|"
-              echo "| Cliente externo | \`${client_result}\` |"
-              echo "| Container ainda ativo | \`${running}\` |"
-            } >> "$GITHUB_STEP_SUMMARY"
-            if [[ "$scenario" == "vulnerable" && "$running" != "false" ]]; then
-              echo "[workflow] ERRO: era esperado que o container vulnerável encerrasse."
-              failed=1
-            elif [[ "$scenario" == "fixed" && "$running" != "true" ]]; then
-              echo "[workflow] ERRO: era esperado que o container corrigido continuasse ativo."
-              failed=1
-            fi
-
-            # Exibe o stack trace no console do job e em bloco shell no Summary.
-            echo "[workflow] Logs do servidor antes da limpeza:"
-            {
-              echo
-              echo "#### Log do servidor (Docker)"
-              echo
-              echo '```shell'
-            } >> "$GITHUB_STEP_SUMMARY"
-            docker logs --timestamps "$container" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            docker rm -f "$container" >/dev/null 2>&1
-          fi
-
-          result="FALHOU"
-          [[ "$failed" -eq 0 ]] && result="PASSOU"
-          echo "[workflow] Resultado final da demonstração: ${result}"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Resultado do job de demonstração: ${result}.**" >> "$GITHUB_STEP_SUMMARY"
-          echo "gate_passed=$([[ "$failed" -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
-      # O Resultado final roda depois da demonstração do cenário selecionado.
-      - name: Resultado final da demonstração
+      - name: Resumo da construção
         if: always()
         env:
-          GATE_PASSED: ${{ steps.attack.outputs.gate_passed }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          SAVE_RESULT: ${{ steps.save_image.outcome }}
+          UPLOAD_RESULT: ${{ steps.upload_image.outcome }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
-          if [[ "$SCENARIO" == "vulnerable" ]]; then
-            expected="a requisição provoca a exceção e o processo vulnerável encerra"
+          {
+            echo "## Construção da imagem"
+            echo
+            echo "- Cenário: **$SCENARIO**"
+            echo "- Build: **$BUILD_RESULT**"
+            echo "- Exportação: **$SAVE_RESULT**"
+            echo "- Artefato: **$UPLOAD_RESULT**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  demonstrate_attack:
+    name: Executar demonstrações
+    needs: build_image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Baixar imagem construída
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: imagem-demo-${{ github.run_id }}
+
+      - name: Carregar imagem no Docker
+        shell: bash
+        env:
+          IMAGE: demo:${{ github.sha }}
+        run: docker load --input image.tar
+
+      - name: Iniciar aplicação isolada
+        id: start_container
+        shell: bash
+        env:
+          IMAGE: demo:${{ github.sha }}
+          CONTAINER: demo-${{ github.run_id }}
+        run: docker run --detach --name "$CONTAINER" --cpus=1 --memory=256m --publish 127.0.0.1:3000:3000 "$IMAGE"
+
+      - name: Simular abuso do usuário privilegiado
+        id: privilege_test
+        shell: bash
+        env:
+          CONTAINER: demo-${{ github.run_id }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          set -u
+          protected_file="/root/privilege-canary.txt"
+          failed=0
+          runtime_uid=unknown
+          attack_result=falha_na_preparacao
+          attack_output=""
+
+          if runtime_uid="$(docker exec "$CONTAINER" id -u)"; then
+            echo "UID efetivo do processo: $runtime_uid"
           else
-            expected="a versão corrigida responde com HTTP 200 e continua em execução"
+            echo "Não foi possível consultar o UID do processo."
+            failed=1
           fi
 
-          if [[ "$GATE_PASSED" != "true" ]]; then
-            echo "## Resultado final: comportamento diferente do esperado" >> "$GITHUB_STEP_SUMMARY"
-            echo "Cenário selecionado: **${SCENARIO}**." >> "$GITHUB_STEP_SUMMARY"
-            echo "Comportamento esperado: ${expected}." >> "$GITHUB_STEP_SUMMARY"
-            echo "O resultado observado não confirmou esse comportamento. Consulte os logs do cliente e do servidor acima." >> "$GITHUB_STEP_SUMMARY"
-            echo "[resultado] O cenário ${SCENARIO} não apresentou o comportamento esperado: ${expected}."
+          # O arquivo canário existe somente no contêiner descartável.
+          if docker exec --user 0 "$CONTAINER" sh -c "printf original > '$protected_file' && chmod 600 '$protected_file'"; then
+            echo "Tentando alterar o arquivo protegido com o usuário padrão do aplicativo..."
+            if attack_output="$(docker exec "$CONTAINER" sh -c "printf alterado-pelo-app >> '$protected_file'" 2>&1)"; then
+              attack_result=permitido
+              echo "A escrita foi permitida."
+            else
+              attack_result=bloqueado
+              echo "A escrita foi negada."
+            fi
+            if [[ -n "$attack_output" ]]; then
+              echo "$attack_output"
+            fi
+          else
+            echo "Falha ao preparar o arquivo canário protegido."
+            failed=1
+          fi
+
+          if [[ "$SCENARIO" == "vulnerable" && "$attack_result" != "permitido" ]]; then
+            echo "Esperava-se escrita permitida como root no cenário vulnerável."
+            failed=1
+          elif [[ "$SCENARIO" == "fixed" && "$attack_result" != "bloqueado" ]]; then
+            echo "Esperava-se que o usuário não privilegiado fosse bloqueado."
+            failed=1
+          fi
+
+          {
+            echo "## Teste de abuso de privilégio"
+            echo
+            echo "Tentativa de modificar um arquivo protegido, dentro do contêiner, usando o usuário padrão da aplicação."
+            echo
+            echo "| Cenário | UID observado | Ataque | Resultado esperado |"
+            echo "|---|---:|---|---|"
+            if [[ "$SCENARIO" == "vulnerable" ]]; then
+              echo "| $SCENARIO | $runtime_uid | $attack_result | Escrita permitida como root |"
+            else
+              echo "| $SCENARIO | $runtime_uid | $attack_result | Escrita bloqueada |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$failed"
+
+      - name: Demonstrar a CVE-2022-38900 por HTTP
+        id: cve_test
+        shell: bash
+        env:
+          CONTAINER: demo-${{ github.run_id }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          ready=0
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" -ne 1 ]]; then
+            echo "O serviço não ficou pronto dentro do tempo esperado."
             exit 1
           fi
-          echo "## Resultado final: comportamento esperado observado" >> "$GITHUB_STEP_SUMMARY"
-          echo "Cenário selecionado: **${SCENARIO}**." >> "$GITHUB_STEP_SUMMARY"
-          echo "Comportamento esperado: ${expected}." >> "$GITHUB_STEP_SUMMARY"
-          echo "O resultado observado corresponde ao esperado para este cenário." >> "$GITHUB_STEP_SUMMARY"
-          echo "[resultado] O cenário ${SCENARIO} apresentou o comportamento esperado: ${expected}."
+
+          node scripts/demo-attack.mjs "$SCENARIO"
+          running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER")"
+          echo "Contêiner em execução após a requisição: $running"
+
+          if [[ "$SCENARIO" == "vulnerable" && "$running" != "false" ]]; then
+            echo "Esperava-se que a requisição encerrasse o processo vulnerável."
+            exit 1
+          elif [[ "$SCENARIO" == "fixed" && "$running" != "true" ]]; then
+            echo "Esperava-se que o serviço corrigido continuasse ativo."
+            exit 1
+          fi
+
+          {
+            echo
+            echo "### Resultado do teste HTTP"
+            echo
+            echo "- Cenário: **$SCENARIO**"
+            echo "- Contêiner após a requisição: **$running**"
+            if [[ "$SCENARIO" == "vulnerable" ]]; then
+              echo "- Esperado: a entrada malformada encerra o processo vulnerável."
+            else
+              echo "- Esperado: o serviço corrigido continua respondendo."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Exibir logs do servidor
+        if: always() && steps.start_container.outcome == 'success'
+        env:
+          CONTAINER: demo-${{ github.run_id }}
+        run: docker logs --timestamps "$CONTAINER" 2>&1 || true
+
+      - name: Remover contêiner de demonstração
+        if: always()
+        env:
+          CONTAINER: demo-${{ github.run_id }}
+        run: docker rm --force "$CONTAINER" >/dev/null 2>&1 || true
+
+      - name: Resumo final da demonstração
+        if: always()
+        env:
+          JOB_RESULT: ${{ job.status }}
+          SCENARIO: ${{ inputs.scenario }}
+          PRIVILEGE_RESULT: ${{ steps.privilege_test.outcome }}
+          CVE_RESULT: ${{ steps.cve_test.outcome }}
+        run: |
+          {
+            echo
+            echo "## Resultado final"
+            echo
+            echo "- Cenário: **$SCENARIO**"
+            echo "- Teste de abuso de privilégio: **$PRIVILEGE_RESULT**"
+            echo "- Teste HTTP da CVE: **$CVE_RESULT**"
+            echo "- Resultado do job: **$JOB_RESULT**"
+            echo
+            echo "O teste do arquivo canário demonstra o efeito de executar como root dentro do contêiner. Ele é independente da CVE-2022-38900, que demonstra negação de serviço."
+          } >> "$GITHUB_STEP_SUMMARY"
