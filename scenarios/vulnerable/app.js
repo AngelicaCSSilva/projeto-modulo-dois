@@ -1,12 +1,11 @@
 const http = require("node:http");
-const decodeUriComponent = require("decode-uri-component");
 
 // A porta pode ser sobrescrita para facilitar execução local ou em container.
 const port = Number(process.env.PORT || 3000);
 
 // Este serviço bancário fictício é intencionalmente pequeno: ele simula uma
 // consulta de pagamento para que a demonstração foque na dependência testada.
-const server = http.createServer((request, response) => {
+const server = http.createServer(async (request, response) => {
   // Separa caminho e query string sem decodificar a query automaticamente.
   // Assim, a sequência percent-encoded chega intacta à dependência abaixo.
   const [path, rawQuery = ""] = request.url.split("?", 2);
@@ -26,6 +25,8 @@ const server = http.createServer((request, response) => {
   // O valor controlado pelo cliente vai direto ao pacote de decodificação.
   // A versão da dependência é a única diferença entre os cenários.
   console.log(`[decode] Iniciando a decodificação da referência recebida (${encodedReference.length} caracteres).`);
+  const decoderModule = await import("decode-uri-component");
+  const decodeUriComponent = decoderModule.default ?? decoderModule;
   const reference = decodeUriComponent(encodedReference);
   console.log("[decode] Decodificação concluída.");
 
