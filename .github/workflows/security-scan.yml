@@ -1,4 +1,4 @@
-name: Análise de segurança da cadeia de suprimentos
+name: Análise de segurança da cadeia de suprimentos e integridade da imagem
 run-name: "Scans de segurança — ${{ inputs.scenario }}"
 
 on:
