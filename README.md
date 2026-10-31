@@ -122,7 +122,7 @@ O workflow **.github/workflows/security-scan.yml** é iniciado manualmente no Gi
 
 Depois, o job de scan constrói a imagem escolhida e executa os controles:
 
-1. **Syft** gera um SBOM CycloneDX, inventariando os componentes da imagem.
+1. **Syft** gera um SBOM CycloneDX, inventariando os componentes da imagem. O JSON completo é impresso no log da execução; o Summary mostra até 10 componentes e informa o total. Se houver mais de 10, os componentes restantes ficam no arquivo `reports/sbom.cdx.json`, incluído no artefato `relatorios-de-seguranca-<cenário>`.
 2. **Trivy** verifica vulnerabilidades do sistema operacional e das bibliotecas. O gate considera achados HIGH e CRITICAL com correção disponível e registra os detalhes no Summary e nos artefatos.
 3. **Conftest e Rego** verificam se o Dockerfile define um usuário não privilegiado.
 4. **Cosign** assina o arquivo da imagem em modo keyless usando OIDC do GitHub, verifica a assinatura e confirma que uma cópia alterada é rejeitada.
