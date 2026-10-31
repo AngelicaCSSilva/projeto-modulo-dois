@@ -13,15 +13,33 @@ on:
           - vulnerable
           - fixed
 
-permissions:
-  contents: read
-  id-token: write
-  security-events: read
-
 jobs:
+  pre-scan:
+    name: Validar workflows com zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enviar achados do zizmor ao Advanced Security
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+
+      - name: Bloquear e exibir achados do zizmor
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          advanced-security: false
+          annotations: true
+
   scan:
+    needs: pre-scan
     name: Analisar imagem e verificar integridade
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Baixar o repositório
         uses: actions/checkout@v4
