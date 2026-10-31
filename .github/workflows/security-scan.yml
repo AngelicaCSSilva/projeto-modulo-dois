@@ -84,6 +84,51 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      # Mostra o SBOM completo no log e resume até 10 componentes no Summary.
+      - name: Exibir SBOM gerado pelo Syft
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          SCENARIO: ${{ steps.prepare.outputs.scenario }}
+        run: |
+          if [[ ! -s reports/sbom.cdx.json ]]; then
+            echo 'SBOM não foi gerado; consulte o resultado da etapa do Syft.'
+            exit 0
+          fi
+
+          echo 'SBOM CycloneDX completo:'
+          cat reports/sbom.cdx.json
+
+          node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const sbom = JSON.parse(fs.readFileSync('reports/sbom.cdx.json', 'utf8'));
+          const components = sbom.components || [];
+          const limit = 10;
+
+          console.log('### Componentes do SBOM (Syft)');
+          console.log('');
+          console.log(`Total de componentes: ${components.length}.`);
+          console.log('');
+          if (components.length === 0) {
+            console.log('O SBOM não contém componentes listados.');
+          } else {
+            console.log('| # | Componente | Versão | Tipo |');
+            console.log('| ---: | --- | --- | --- |');
+            for (const [index, component] of components.slice(0, limit).entries()) {
+              const name = String(component.name || '—').replaceAll('|', '\\|');
+              const version = String(component.version || '—').replaceAll('|', '\\|');
+              const type = String(component.type || '—').replaceAll('|', '\\|');
+              console.log(`| ${index + 1} | ${name} | ${version} | ${type} |`);
+            }
+            if (components.length > limit) {
+              console.log('');
+              console.log(`Exibidos os primeiros ${limit} componentes. Os ${components.length - limit} restantes estão no artefato relatorios-de-seguranca-${process.env.SCENARIO}, no arquivo reports/sbom.cdx.json.`);
+            }
+          }
+          console.log('');
+          NODE
+          
       # O Trivy analisa o sistema operacional e as dependências da imagem.
       # O código 1 indica achados HIGH ou CRITICAL, mas não interrompe os demais scans.
       - name: Procurar vulnerabilidades com Trivy
