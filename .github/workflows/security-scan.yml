@@ -21,8 +21,10 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Baixar o repositório
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Enviar achados do zizmor ao Advanced Security
         uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
@@ -42,11 +44,9 @@ jobs:
       id-token: write
     steps:
       - name: Baixar o repositório
-        uses: actions/checkout@v4
-
-      # Analisa os workflows do GitHub Actions em busca de riscos e más práticas.
-      - name: Validar workflows com zizmor
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Preparar diretório e variáveis de ambiente
         id: prepare
