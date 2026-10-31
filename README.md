@@ -8,6 +8,9 @@ Projeto final do segundo módulo da formação em Especialista em Esteira DevSec
 > [!NOTE]
 > **Escopo da demonstração:** este projeto aborda um risco de segurança na cadeia de suprimentos de software causado por uma dependência de terceiros vulnerável e demonstra riscos de configuração da imagem definidos nos Dockerfiles: execução do processo como `root` e inclusão de componentes herdados da imagem-base. Ele não simula a publicação deliberada de código malicioso, o comprometimento do mantenedor ou do processo de build. A biblioteca contém uma falha que um atacante pode explorar enviando uma entrada HTTP preparada; neste cenário, o efeito demonstrado é DoS.
 
+<img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/7a03aa63-046d-443d-8bdc-4367907744f4" />
+
+
 ## Navegação
 
 - [Visão geral](#projeto-final-do-segundo-módulo---especialista-em-esteira-devsecops)
