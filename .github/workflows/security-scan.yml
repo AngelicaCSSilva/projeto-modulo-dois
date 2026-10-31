@@ -25,6 +25,10 @@ jobs:
       - name: Baixar o repositório
         uses: actions/checkout@v4
 
+      # Analisa os workflows do GitHub Actions em busca de riscos e más práticas.
+      - name: Validar workflows com zizmor
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+
       - name: Preparar diretório e variáveis de ambiente
         id: prepare
         shell: bash
