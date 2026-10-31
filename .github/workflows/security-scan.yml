@@ -214,7 +214,8 @@ jobs:
         with:
           name: relatorios-de-seguranca-${{ inputs.scenario }}
           path: reports/
-          if-no-files-found: fail
+          if-no-files-found: error
+          
       # A única decisão de sucesso ou falha do workflow é tomada aqui, depois dos scans.
       - name: Gate final de segurança
         if: always()
