@@ -1,0 +1,267 @@
+name: Análise de segurança da cadeia de suprimentos
+run-name: "Scans de segurança — ${{ inputs.scenario }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Cenário da aplicação que será analisado
+        type: choice
+        required: true
+        default: fixed
+        options:
+          - vulnerable
+          - fixed
+
+jobs:
+  pre-scan:
+    name: Validar workflows com zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Enviar achados do zizmor ao Advanced Security
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+
+      - name: Bloquear e exibir achados do zizmor
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          advanced-security: false
+          annotations: true
+
+  scan:
+    needs: pre-scan
+    name: Analisar imagem e verificar integridade
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar diretório e variáveis de ambiente
+        id: prepare
+        shell: bash
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          mkdir -p reports
+          image="demo:${GITHUB_SHA}"
+          echo "scenario=$SCENARIO" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "## Análise do cenário: `$SCENARIO`" >> "$GITHUB_STEP_SUMMARY"
+
+      # A imagem é construída uma única vez e usada por todas as ferramentas.
+      # Se a construção falhar, as etapas de análise ainda serão executadas e
+      # registrarão a falha; o gate final reunirá todos os resultados.
+      - name: Construir imagem do cenário selecionado
+        id: build_image
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          SCENARIO: ${{ steps.prepare.outputs.scenario }}
+          IMAGE: ${{ steps.prepare.outputs.image }}
+        run: |
+          docker build --tag "$IMAGE" "scenarios/$SCENARIO"
+          docker save --output reports/image.tar "$IMAGE"
+
+      # O Syft gera um inventário CycloneDX dos componentes da imagem.
+      - name: Gerar SBOM com Syft
+        id: syft_scan
+        if: always()
+        continue-on-error: true
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ steps.prepare.outputs.image }}
+          format: cyclonedx-json
+          output-file: reports/sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # O Trivy analisa o sistema operacional e as dependências da imagem.
+      # O código 1 indica achados HIGH ou CRITICAL, mas não interrompe os demais scans.
+      - name: Procurar vulnerabilidades com Trivy
+        id: trivy_scan
+        if: always()
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.prepare.outputs.image }}
+          format: json
+          output: reports/trivy.json
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          timeout: 10m
+
+      # Imprime apenas a lista de vulnerabilidades, sem o restante do JSON do Trivy.
+      - name: Imprimir vulnerabilidades encontradas
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [[ -s reports/trivy.json ]]; then
+            node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('reports/trivy.json', 'utf8'));
+          const vulnerabilities = (report.Results || []).flatMap(result =>
+            (result.Vulnerabilities || []).map(item => ({
+              id: item.VulnerabilityID || '—',
+              severity: item.Severity || '—',
+              package: item.PkgName || '—',
+              installed: item.InstalledVersion || '—',
+              fixed: item.FixedVersion || '—'
+            }))
+          );
+
+          console.log('Vulnerabilidades encontradas:');
+          if (vulnerabilities.length === 0) {
+            console.log('Nenhuma vulnerabilidade encontrada.');
+          } else {
+            for (const item of vulnerabilities) {
+              console.log(`- ${item.id} | ${item.severity} | ${item.package} | instalada: ${item.installed} | corrigida: ${item.fixed}`);
+            }
+          }
+          NODE
+          else
+            echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
+          fi
+
+      - name: Instalar Conftest
+        id: conftest_install
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          version="0.71.1"
+          archive="$RUNNER_TEMP/conftest.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${version}/conftest_${version}_Linux_x86_64.tar.gz" \
+            --output "$archive"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" conftest
+          sudo install --mode 0755 "$RUNNER_TEMP/conftest" /usr/local/bin/conftest
+          conftest --version
+
+      - name: Avaliar políticas Rego com Conftest
+        id: rego_policy
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          SCENARIO: ${{ steps.prepare.outputs.scenario }}
+        run: |
+          set -o pipefail
+          conftest test --no-color "scenarios/${SCENARIO}/Dockerfile" \
+            --policy policies/docker/ 2>&1 | tee reports/conftest.log
+
+      - name: Gate final de segurança
+        if: always()
+        shell: bash
+        env:
+          BUILD_OUTCOME: ${{ steps.build_image.outcome }}
+          SYFT_OUTCOME: ${{ steps.syft_scan.outcome }}
+          TRIVY_OUTCOME: ${{ steps.trivy_scan.outcome }}
+          CONFTEST_INSTALL_OUTCOME: ${{ steps.conftest_install.outcome }}
+          REGO_OUTCOME: ${{ steps.rego_policy.outcome }}
+        run: |
+          set -u
+          failed=0
+
+          scan_status() {
+            if [[ "$1" == "success" ]]; then
+              printf '✅ %s' "$1"
+            else
+              printf '❌ %s' "$1"
+            fi
+          }
+
+          {
+            echo "## Resultado dos scans"
+            echo
+            echo "| Verificação | Resultado |"
+            echo "| --- | --- |"
+            printf '| Construção da imagem | %s |\n' "$(scan_status "$BUILD_OUTCOME")"
+            printf '| SBOM com Syft | %s |\n' "$(scan_status "$SYFT_OUTCOME")"
+            printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$(scan_status "$TRIVY_OUTCOME")"
+            printf '| Instalação do Conftest | %s |\n' "$(scan_status "$CONFTEST_INSTALL_OUTCOME")"
+            printf '| Políticas Rego | %s |\n' "$(scan_status "$REGO_OUTCOME")"
+            echo
+            echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          check_outcome() {
+            local name="$1"
+            local outcome="$2"
+            if [[ "$outcome" != "success" ]]; then
+              echo "Falha em: $name (resultado: $outcome)"
+              failed=1
+            fi
+          }
+
+          check_outcome "construção da imagem" "$BUILD_OUTCOME"
+          check_outcome "SBOM com Syft" "$SYFT_OUTCOME"
+          check_outcome "Trivy" "$TRIVY_OUTCOME"
+          check_outcome "instalação do Conftest" "$CONFTEST_INSTALL_OUTCOME"
+          check_outcome "política Rego" "$REGO_OUTCOME"
+
+          if [[ -s reports/trivy.json ]]; then
+            node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('reports/trivy.json', 'utf8'));
+          const findings = (report.Results || []).flatMap(result =>
+            (result.Vulnerabilities || []).map(vulnerability => ({
+              id: vulnerability.VulnerabilityID || '—',
+              severity: vulnerability.Severity || '—',
+              package: vulnerability.PkgName || '—',
+              installed: vulnerability.InstalledVersion || '—',
+              fixed: vulnerability.FixedVersion || ''
+            }))
+          );
+          const highOrCritical = findings.filter(item =>
+            ['HIGH', 'CRITICAL'].includes(item.severity.toUpperCase()) && item.fixed
+          );
+          console.log('### Achados do Trivy');
+          console.log('');
+          if (highOrCritical.length === 0) {
+            console.log('Nenhuma vulnerabilidade HIGH ou CRITICAL com correção disponível foi encontrada.');
+          } else {
+            console.log('| CVE | Severidade | Pacote | Versão instalada | Versão corrigida |');
+            console.log('| --- | --- | --- | --- | --- |');
+            for (const item of highOrCritical) {
+              console.log(`| ${item.id} | ${item.severity} | ${item.package} | ${item.installed} | ${item.fixed} |`);
+            }
+          }
+          console.log('');
+          NODE
+          fi
+
+          if [[ -s reports/conftest.log ]]; then
+            {
+              echo "### Resultado detalhado da política Rego"
+              echo
+              echo '```text'
+              cat reports/conftest.log
+              echo '```'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "$failed" -eq 0 ]]; then
+            echo "Aplicação considerada segura para os critérios executados: todos os scans e políticas foram concluídos sem falhas e o Cosign confirmou a integridade da imagem." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Aplicação não considerada segura: pelo menos um scan ou verificação falhou. Consulte os logs e os relatórios publicados como artefato." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
