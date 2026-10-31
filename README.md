@@ -4,6 +4,8 @@
 
 Projeto final do segundo módulo da formação em Especialista em Esteira DevSecOps da ADA. A demonstração usa uma aplicação fictícia de pagamentos para mostrar dois riscos: uma dependência vulnerável e a execução de um container como root.
 
+> **Escopo da demonstração:** este projeto aborda um risco de segurança na cadeia de suprimentos de software causado por uma dependência de terceiros vulnerável e demonstra riscos de configuração da imagem definidos nos Dockerfiles: execução do processo como root e inclusão de componentes herdados da imagem-base. Ele não simula a publicação deliberada de código malicioso, o comprometimento do mantenedor ou do processo de build. A biblioteca contém uma falha que um atacante pode explorar enviando uma entrada HTTP preparada; neste cenário, o efeito demonstrado é DoS.
+
 ## Explicação da vulnerabilidade — Supply Chain
 
 A aplicação usa o pacote npm **decode-uri-component** para decodificar a referência de um pagamento recebida pela URL. No cenário vulnerável, a dependência está fixada na versão **0.2.0**, afetada pela CVE-2022-38900.
