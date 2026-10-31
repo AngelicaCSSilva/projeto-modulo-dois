@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "Mesmo app didático do cenário vulnerável; fixa decode-uri-component 0.2.2, que contém a correção da CVE-2022-38900.",
-  "scripts": { "start": "node app.js" },
-  "dependencies": { "decode-uri-component": "0.2.2" }
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "decode-uri-component": "0.5.1"
+  }
 }
