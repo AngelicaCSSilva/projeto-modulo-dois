@@ -125,6 +125,7 @@ Depois, o job de scan constrói a imagem escolhida e executa os controles:
 1. **Syft** gera um SBOM CycloneDX, inventariando os componentes da imagem.
 2. **Trivy** verifica vulnerabilidades do sistema operacional e das bibliotecas. O gate considera achados HIGH e CRITICAL com correção disponível e registra os detalhes no Summary e nos artefatos.
 3. **Conftest e Rego** verificam se o Dockerfile define um usuário não privilegiado.
+4. **Cosign** assina o arquivo da imagem em modo keyless usando OIDC do GitHub, verifica a assinatura e confirma que uma cópia alterada é rejeitada.
 
 ### Exemplo de achados do Trivy no cenário vulnerável
 
