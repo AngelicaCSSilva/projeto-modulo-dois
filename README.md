@@ -10,6 +10,12 @@ Projeto final do segundo módulo da formação em Especialista em Esteira DevSec
 
 <img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/7a03aa63-046d-443d-8bdc-4367907744f4" />
 
+## Execuções finais
+
+- [Demonstração de vulnerabilidades - Imagem Vulnerável](https://github.com/AngelicaCSSilva/projeto-modulo-dois/actions/runs/41246721540)
+- [Demonstração de vulnerabilidades - Imagem Corrigida](https://github.com/AngelicaCSSilva/projeto-modulo-dois/actions/runs/41246919015)
+- [Análise de segurança - Imagem Vulnerável](https://github.com/AngelicaCSSilva/projeto-modulo-dois/actions/runs/41246990023)
+- [Análise de segurança - Imagem Corrigida](https://github.com/AngelicaCSSilva/projeto-modulo-dois/actions/runs/41247112210)
 
 ## Navegação
 
