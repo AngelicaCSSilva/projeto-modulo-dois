@@ -19,15 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
     steps:
       - name: Baixar o repositório
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Enviar achados do zizmor ao Advanced Security
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
 
       - name: Bloquear e exibir achados do zizmor
         uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
@@ -139,6 +135,7 @@ jobs:
             echo 'Relatório do Trivy não foi gerado; consulte o resultado da etapa do Trivy.'
           fi
 
+      # Conftest avalia as políticas Rego sobre o Dockerfile do cenário selecionado.
       - name: Instalar Conftest
         id: conftest_install
         if: always()
@@ -166,6 +163,59 @@ jobs:
           conftest test --no-color "scenarios/${SCENARIO}/Dockerfile" \
             --policy policies/docker/ 2>&1 | tee reports/conftest.log
 
+      # A assinatura keyless não exige uma chave privada armazenada no repositório.
+      - name: Instalar Cosign
+        id: cosign_install
+        if: always()
+        continue-on-error: true
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      # Assina o arquivo da imagem, verifica sua assinatura e confirma que uma
+      # cópia alterada é rejeitada. O token OIDC é usado somente nesta etapa.
+      - name: Assinar e verificar a integridade com Cosign
+        id: cosign_check
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          IMAGE_ARCHIVE: reports/image.tar
+        run: |
+          set -euo pipefail
+          bundle="reports/image.tar.sigstore.json"
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/security-scan.yml@${GITHUB_REF}"
+
+          cosign version
+          cosign sign-blob --yes --bundle "$bundle" "$IMAGE_ARCHIVE"
+          cosign verify-blob "$IMAGE_ARCHIVE" \
+            --bundle "$bundle" \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+          cp "$IMAGE_ARCHIVE" reports/image-alterada.tar
+          printf '\0' >> reports/image-alterada.tar
+          if cosign verify-blob reports/image-alterada.tar \
+            --bundle "$bundle" \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            > reports/verificacao-alteracao.log 2>&1; then
+            cat reports/verificacao-alteracao.log
+            echo "A verificação aceitou uma imagem alterada." >&2
+            exit 1
+          fi
+          echo "A assinatura original foi verificada e a cópia alterada foi rejeitada."
+
+      # Os relatórios ficam disponíveis mesmo quando algum scanner encontra problemas.
+      - name: Publicar relatórios dos scans
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relatorios-de-seguranca-${{ inputs.scenario }}
+          path: reports/
+          if-no-files-found: fail
+      # A única decisão de sucesso ou falha do workflow é tomada aqui, depois dos scans.
       - name: Gate final de segurança
         if: always()
         shell: bash
@@ -175,6 +225,8 @@ jobs:
           TRIVY_OUTCOME: ${{ steps.trivy_scan.outcome }}
           CONFTEST_INSTALL_OUTCOME: ${{ steps.conftest_install.outcome }}
           REGO_OUTCOME: ${{ steps.rego_policy.outcome }}
+          COSIGN_INSTALL_OUTCOME: ${{ steps.cosign_install.outcome }}
+          COSIGN_OUTCOME: ${{ steps.cosign_check.outcome }}
         run: |
           set -u
           failed=0
@@ -197,6 +249,8 @@ jobs:
             printf '| Vulnerabilidades com Trivy (HIGH/CRITICAL) | %s |\n' "$(scan_status "$TRIVY_OUTCOME")"
             printf '| Instalação do Conftest | %s |\n' "$(scan_status "$CONFTEST_INSTALL_OUTCOME")"
             printf '| Políticas Rego | %s |\n' "$(scan_status "$REGO_OUTCOME")"
+            printf '| Instalação do Cosign | %s |\n' "$(scan_status "$COSIGN_INSTALL_OUTCOME")"
+            printf '| Assinatura e verificação com Cosign | %s |\n' "$(scan_status "$COSIGN_OUTCOME")"
             echo
             echo "O critério do Trivy considera vulnerabilidades HIGH e CRITICAL, com correção disponível."
             echo
@@ -216,6 +270,8 @@ jobs:
           check_outcome "Trivy" "$TRIVY_OUTCOME"
           check_outcome "instalação do Conftest" "$CONFTEST_INSTALL_OUTCOME"
           check_outcome "política Rego" "$REGO_OUTCOME"
+          check_outcome "instalação do Cosign" "$COSIGN_INSTALL_OUTCOME"
+          check_outcome "verificação com Cosign" "$COSIGN_OUTCOME"
 
           if [[ -s reports/trivy.json ]]; then
             node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
