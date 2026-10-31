@@ -157,7 +157,9 @@ O relatório abaixo mostra os achados observados na imagem vulnerável. Os pacot
 | [CVE-2026-19534](https://github.com/advisories/GHSA-rfgv-xxqx-mfg5) | `HIGH` | undici | 6.28.0 | 6.28.1, 7.29.1, 8.10.2 |
 | [CVE-2026-87018](https://github.com/advisories/GHSA-qrxm-fqhp-jwvm) | `HIGH` | undici | 6.28.0 | 6.29.1, 7.30.1, 8.12.2 |
 
-Os relatórios são publicados como artefato do workflow. O SBOM ajuda a identificar quais componentes foram usados; o `Trivy` compara esses componentes com vulnerabilidades conhecidas quando o workflow é executado. Assim, o processo pode detectar novas vulnerabilidades conhecidas nas próximas execuções, mas não atualiza dependências automaticamente nem monitora a imagem continuamente.
+Os relatórios são publicados como artefato do workflow. O `Syft` gera o SBOM para inventariar os componentes da imagem, enquanto o `Trivy` faz o scan da própria imagem em busca de vulnerabilidades conhecidas no sistema operacional e nas bibliotecas. No fluxo atual, o `Trivy` não consome o SBOM gerado pelo `Syft`. Uma nova execução do workflow faz um novo scan da imagem; o processo não atualiza dependências automaticamente nem monitora imagens continuamente.
+
+Em uma empresa, os SBOMs poderiam ser armazenados em um repositório central com os inventários dos projetos. Uma rotina periódica poderia verificar esses SBOMs contra vulnerabilidades recém-divulgadas, concentrando a verificação, o armazenamento e a auditoria em um único lugar. Essa arquitetura complementaria os scans executados nos workflows; não faz parte da implementação atual deste projeto.
 
 ## Como executar
 
