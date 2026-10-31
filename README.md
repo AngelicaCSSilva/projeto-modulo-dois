@@ -1,4 +1,4 @@
-# Raio-X da Cadeia de Suprimentos
+# Projeto Final do Segundo Módulo - Especialista em Esteira DevSecOps
 
 > **Última atualização: 31/10/2026.** Vulnerabilidades divulgadas após essa data não serão corrigidas neste projeto.
 
