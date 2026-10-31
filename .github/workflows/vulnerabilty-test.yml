@@ -68,6 +68,78 @@ jobs:
             failed=1
           else
             echo "[workflow] Container iniciado: ${container}"
+
+            # Confirma a identidade efetiva do processo dentro do container.
+            if runtime_uid="$(docker exec "$container" id -u)"; then
+              echo "[workflow] UID efetivo dentro do container: ${runtime_uid}"
+              if [[ "$scenario" == "vulnerable" && "$runtime_uid" != "0" ]]; then
+                echo "[workflow] ERRO: era esperado UID 0 no cenário vulnerável."
+                failed=1
+              elif [[ "$scenario" == "fixed" && "$runtime_uid" == "0" ]]; then
+                echo "[workflow] ERRO: o cenário corrigido não deve executar como root."
+                failed=1
+              else
+                echo "[workflow] Usuário efetivo corresponde ao esperado para ${scenario}."
+              fi
+            else
+              runtime_uid=unknown
+              echo "[workflow] ERRO: não foi possível consultar o UID do processo no container."
+              failed=1
+            fi
+            {
+              echo
+              echo "#### Usuário efetivo do container"
+              echo
+              echo "| Cenário | UID observado | Resultado esperado |"
+              echo "|---|---:|---|"
+              if [[ "$scenario" == "vulnerable" ]]; then
+                echo "| \`${scenario}\` | \`${runtime_uid}\` | UID 0 (root) |"
+              else
+                echo "| \`${scenario}\` | \`${runtime_uid}\` | UID diferente de 0 |"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            # Simulates malicious code running as the app's default user.
+            # The protected canary file exists only inside this disposable container.
+            protected_file="/root/privilege-canary.txt"
+            if ! docker exec --user 0 "$container" sh -c "printf original > '${protected_file}' && chmod 600 '${protected_file}'"; then
+              echo "[ataque] ERRO: nao foi possivel preparar o arquivo canario protegido."
+              attack_result=setup_failed
+              failed=1
+            else
+              echo "[ataque] Tentando alterar arquivo root-only com o usuario padrao do app..."
+              if attack_output="$(docker exec "$container" sh -c "printf 'alterado pelo processo do app' >> '${protected_file}'" 2>&1)"; then
+                attack_result=succeeded
+                echo "[ataque] A escrita no arquivo protegido foi permitida."
+              else
+                attack_result=blocked
+                echo "[ataque] A escrita no arquivo protegido foi negada."
+              fi
+              if [[ -n "$attack_output" ]]; then
+                echo "$attack_output"
+              fi
+
+              if [[ "$scenario" == "vulnerable" && "$attack_result" != "succeeded" ]]; then
+                echo "[ataque] ERRO: era esperado que root conseguisse alterar o arquivo canario."
+                failed=1
+              elif [[ "$scenario" == "fixed" && "$attack_result" != "blocked" ]]; then
+                echo "[ataque] ERRO: o usuario nao privilegiado deveria ter a escrita negada."
+                failed=1
+              fi
+            fi
+            {
+              echo
+              echo "#### Simulacao de abuso de privilegio"
+              echo
+              echo "Tentativa de anexar conteudo a ${protected_file} com o usuario padrao do processo da aplicacao."
+              echo
+              echo "| Cenario | Resultado da tentativa | Esperado |"
+              echo "|---|---|---|"
+              if [[ "$scenario" == "vulnerable" ]]; then
+                echo "| ${scenario} | ${attack_result} | Escrita permitida como root |"
+              else
+                echo "| ${scenario} | ${attack_result} | Escrita negada para usuario nao privilegiado |"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
             echo "[workflow] Aguardando o endpoint HTTP de prontidão..."
             ready=0
             for attempt in {1..30}; do
